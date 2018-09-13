@@ -5,7 +5,7 @@ from Read import getUser,getMessage
 import datetime
 from Settings import CHANNEL
 import CNeur_Model
-
+import contractions
 
 bot = CNeur_Model.CNeural(input_td = "ConvNeur/input_td.txt", output_td = "ConvNeur/output_td.txt",
               input_valid = "ConvNeur/input_valid.txt", output_valid = "ConvNeur/output_valid.txt",
@@ -67,8 +67,10 @@ with open("KBotM_"+str(datetime.datetime.now())+".txt", "w") as botfile:
                         s.send(partMess.encode('utf-8'))
                         stay = False
                     else:
-                        print("the context is " + (message[7:].lower()) + " check check\n")
-                        response = bot.twitch_inference(message[7:].lower())
+                        context = message[7:]
+                        context = contractions.fix(context).lower()
+                        print("the context is " + context+"\n")
+                        response = bot.twitch_inference(context)
 
                         botfile.write(message.lower() + "\n")
                         botfile.write(response + "\n")
