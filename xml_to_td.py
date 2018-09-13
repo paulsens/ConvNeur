@@ -2,7 +2,7 @@ import csv
 import requests
 import xml.etree.ElementTree as ET
 import os
-
+import contractions
 
 def parseXML(xmlfile):
     tree = ET.parse(xmlfile)
@@ -72,7 +72,8 @@ def parseXML(xmlfile):
             emptycount+=1
             pass
         else:
-            sentences.append(sentence)
+            sentences.append(contractions.fix(sentence))
+            wordcount+=len(contractions.fix(sentence).split())-len(sentence.split())
         #print(sentence)
 
     return sentences, wordcount, emptycount
