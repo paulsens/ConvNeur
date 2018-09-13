@@ -37,10 +37,10 @@ class CNeural:
         #See create_TD() below
 
         self.encoder_input = Input(shape = (None,), dtype = "int32", name = "input_seq")
-        self.enc1 = LSTM(hidden_dim, return_sequences=True, name='enc1')
-        self.enc2 = LSTM(hidden_dim, return_sequences=True, name='enc2')
-        self.enc3 = LSTM(hidden_dim, return_sequences=True, name='enc3')
-        self.enc4 = LSTM(hidden_dim, return_state=True, name='enc4')
+        self.enc1 = LSTM(hidden_dim, return_sequences=True, name='enc1', stateful=True)
+        self.enc2 = LSTM(hidden_dim, return_sequences=True, name='enc2', stateful=False)
+        self.enc3 = LSTM(hidden_dim, return_sequences=True, name='enc3', stateful=False)
+        self.enc4 = LSTM(hidden_dim, return_state=True, name='enc4', stateful=False)
 
         self.decoder_input = Input(shape = (None,), dtype = "int32", name = "output_seq")
         self.dec1 = LSTM(hidden_dim, return_sequences=True, name='dec1')
@@ -140,7 +140,6 @@ class CNeural:
         print("Model built successfully.\n")
 
         self.built = True
-
 
     def train_model(self):
         if(not self.built):
@@ -386,6 +385,210 @@ class CNeural:
             output = " ".join(output_string)
             print("output is: "+output+"\n")
 
+    def twitch_build_inference(self, weights_file=None, load = False):
+
+
+
+        vocab = read_data(open(CONCAT_FILE, "r"))
+
+        # dict takes in words and spits out indices, r_dict the opposite
+        c_indices, count, self.dict, self.r_dict = collect_data(vocab, VOC_SIZE)
+
+        inference_encInput = Input(batch_shape=(1,None,), dtype="int32", name="input_seqinf")
+        print("Infencinp has shape +"+str(inference_encInput))
+        temp = self.emb_A(inference_encInput)
+        print("temp has shape "+str(temp.shape))
+        temp = self.enc1(temp)
+        #temp = self.enc2(temp)
+        temp = self.enc3(temp)
+        temp, h, c = self.enc4(temp)
+
+        #inf_emb = Embedding(output_dim=2, input_dim=5, input_length=None, mask_zero=True, name='embA')
+        #inf_enc4 = LSTM(2, return_sequences=True, return_state=True, name='enc4')
+
+        #inf_dec4 = LSTM(2, return_sequences=True, return_state=True, name='dec4')
+
+        #inf_dense = Dense(units=5, activation='softmax',
+                             # kernel_initializer=TruncatedNormal(mean=0., stddev = 0.05, seed = None),
+                             #name="dense1")
+
+        #temp = inf_emb(inference_encInput)
+        #temp, h, c = inf_enc4(temp)
+
+        self.enc_model = Model(inputs = inference_encInput, outputs = [temp, h, c])
+        #encoder_states is our context for decoding
+
+        #load the weights obtained during some training
+        if load == True:
+            self.enc_model.load_weights(weights_file, by_name=True)
+        #print("during inference, enc weights are " + str(enc_model.layers[2].get_weights()))
+
+
+        #by_name attaches the weights according to the names of the layers. using the instance variables
+        #facilitates keeping the names constant.
+
+        inference_decInput = Input(batch_shape=(1, None,), dtype="int32", name="input_decinf")
+        dec_state_input_h = Input(batch_shape=(1, HID_DIM,))
+        dec_state_input_c = Input(batch_shape=(1, HID_DIM,))
+        dec_states_inputs = [dec_state_input_h, dec_state_input_c]
+
+        temp = self.emb_A(inference_decInput)
+        temp = self.dec1(temp, initial_state=dec_states_inputs)
+        #temp = self.dec2(temp)
+        temp = self.dec3(temp)
+
+        #temp = inf_emb(inference_decInput)
+
+
+        inference_decOutput, state_h, state_c = self.dec4(temp)
+        #inference_decOutput = self.dec4(temp)
+        dec_states = [state_h, state_c]
+
+        inference_decOutput = TimeDistributed(self.emb_to_vocab)(inference_decOutput)
+
+        #inference_decOutput = Softmax(name="final_output")(inference_decOutput)
+
+        self.dec_model = Model(inputs = [inference_decInput, dec_state_input_h, dec_state_input_c],
+                          outputs = [inference_decOutput]+dec_states)
+        #dec_model = Model(inputs=[inference_decInput]+dec_states_inputs, outputs=inference_decOutput)
+
+        if load == True:
+            self.dec_model.load_weights(weights_file, by_name=True)
+
+
+
+
+
+        #print("Begin conversation. Try not to use contractions.\n Punctuate end of sentences. "
+              #"Capitalization does not matter. Input <quit> to quit.\n")
+
+    def twitch_inference(self, message):
+         #each iteration of this while loop takes input and predicts a response.
+        indices = [self.dict["<sos>"]]
+
+        eos = False
+        count = 0
+        text = message
+        text=text.strip().split()
+        if len(text) ==1 and text[0] == "<quit>":
+            print("Conversation ended.\n")
+            return("Quitting...")
+        for word in text:
+            temp = ""
+
+            if eos:
+                indices.append(self.dict["<sos>"])
+                eos = False
+
+            #change the word into something the model understands
+            word=word.lower()
+            if word[-1] in [".","!","?"]:
+                eos = True
+                word = word[:-1]
+            for char in word:
+                if char.isalpha():
+                    temp += char
+            word = temp
+
+            if word in self.dict:
+                indices.append(self.dict[word])
+                if eos:
+                    indices.append(self.dict["<eos>"])
+
+            else:
+                indices.append(0)
+                if eos:
+                    indices.append(self.dict["<eos>"])
+
+        context_as_strings = [str(idx) for idx in indices]
+        context_string = " ".join(context_as_strings)
+        print("the context string is: "+context_string)
+
+        #indices now contains our input sequence of integers. Run it through the encoder.
+        indices = list(reversed(indices))
+        indices_arr = np.array([indices])
+        print("indices arr is "+str(indices_arr))
+        #we set up this encoder to output a list containing the hidden and cell state
+
+
+
+        enc_output, e_h, e_c = self.enc_model.predict(indices_arr)
+        predicted_states = [e_h, e_c]
+        #print("encoder states have shape "+str(e_h.shape)+" and "+str(e_c.shape))
+
+        decoder_input = [self.dict["<sos>"]]
+        output_string = []
+        output_token = ""
+        token_index = 0
+        tokens = []
+
+        decoder_array = np.array(decoder_input)
+        #print("dec_array has shape "+str(decoder_array.shape))
+
+        while(self.r_dict[token_index] != "<eos>" and count < 15):
+
+            input1_batch = [decoder_array]
+            #input1_batches = [input1_batch1]
+            #we have only 1 batch, and it has only 1 array in it
+            input1_batch = np.array(input1_batch)
+            print(input1_batch.shape)
+
+            input2_batch = e_h
+            #input2_batches = [input2_batch1]
+            input2_batch = np.array(input2_batch)
+            print(input2_batch.shape)
+
+
+            input3_batch = e_c
+            #input3_batches = [input3_batch1]
+            input3_batch = np.array(input3_batch)
+            print(input3_batch.shape)
+
+
+
+            #print("predicting on "+str(np.array([[decoder_array]+predicted_states])))
+            output_tokens, h, c = self.dec_model.predict([input1_batch, input2_batch, input3_batch])
+            #this should be predicting on [ [array, h, c] ]
+            #open the list, each item is a list of the inputs for that prediction
+            #output_tokens should be a vector of dimension VOC_SIZE that has been softmaxed, so we need the argmax
+            #print(str(output_tokens[0,-1,:]))
+            token_index = np.argmax(output_tokens[0,-1,:],axis = 0)
+            decoder_input.append(token_index)
+            #token_index+=3
+            print("output word is "+str(token_index)+" ",end='')
+            #print("decoder input is now "+str(decoder_input))
+
+            #print(r_dict[token_index])
+            #print("\n")
+            #output token is still an index at this point so we add its word to the predicted words so far
+            if(self.r_dict[token_index]=="<eos>"):
+                output_string[-1]+="."
+            else:
+                output_string.append(self.r_dict[token_index])
+
+            decoder_array = np.array(decoder_input)
+            print("decoder_array is "+str(decoder_array))
+
+            #update states for next iteration
+
+            #predicted_states = [h, c]
+
+            #print("new states for decoder are "+str(predicted_states))
+            #so instead of feeding the extended sequence to the decoder each time, we just save its state
+            #and do one word at a time
+            count += 1
+        if output_string[-1] == "<eos>":
+            output_string[-1] = "."
+        output = " ".join(output_string)
+        decoder_input = list(reversed(decoder_input))
+        decoder_input = np.array([decoder_input])
+        print("updating context with reversed output tokens: "+str(decoder_input))
+        _, _, _ = self.enc_model.predict(decoder_input)
+        #i want the encoder to be accumulating all of the context. so we run a dummy prediction
+         #on our encoder to update all the internal states with the context of what the AI just said.
+         #otherwise, the context would only include things typed by the user
+        print("output is: "+output+"\n")
+        return output
 
 
 

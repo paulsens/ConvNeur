@@ -275,20 +275,12 @@ def scrub(input_file):
         line = ifp.readline()
         not_empty = False
         while line:
-            good = False
             line = line.strip().split()
-            if line == ["1","2"]:
-                emptycount += 1
-
+            if line != ["1","2"]:
+                ofp.write(" ".join(line))
+                not_empty = True
             else:
-                for item in line:
-                    if item not in ["1","2","0"]:
-                        good = True
-                if good:
-                    ofp.write(" ".join(line))
-                    not_empty = True
-                else:
-                    emptycount+=1
+                emptycount +=1
             line = ifp.readline()
             if line:
                 if not_empty:
